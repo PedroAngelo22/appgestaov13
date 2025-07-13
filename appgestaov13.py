@@ -208,7 +208,46 @@ elif st.session_state.admin_mode and st.session_state.admin_authenticated:
             st.success(f"Fase '{nova_fase}' adicionada.")
         else:
             st.warning("Fase já existe.")
-          # USUÁRIO AUTENTICADO
+
+    filtro = st.text_input("🔍 Filtrar usuários por nome")
+    usuarios = c.execute("SELECT username, projects, permissions FROM users").fetchall()
+    usuarios = [u for u in usuarios if filtro.lower() in u[0].lower()] if filtro else usuarios
+
+    for user, projetos_atuais, permissoes_atuais in usuarios:
+        st.markdown(f"#### 👤 {user}")
+        col1, col2 = st.columns([1, 2])
+        with col1:
+            if st.button(f"Excluir {user}", key=hash_key(f"del_{user}")):
+                c.execute("DELETE FROM users WHERE username=?", (user,))
+                conn.commit()
+                st.success(f"Usuário {user} removido.")
+                st.rerun()
+        with col2:
+            projetos = st.multiselect(f"Projetos ({user})",
+                                      options=[p[0] for p in c.execute("SELECT name FROM projects").fetchall()],
+                                      default=projetos_atuais.split(',') if projetos_atuais else [],
+                                      key=hash_key(f"proj_{user}"))
+            permissoes = st.multiselect(f"Permissões ({user})",
+                                        options=["upload", "download", "view"],
+                                        default=permissoes_atuais.split(',') if permissoes_atuais else [],
+                                        key=hash_key(f"perm_{user}"))
+            nova_senha = st.text_input(f"Nova senha ({user})", key=hash_key(f"senha_{user}"))
+            if st.button(f"Atualizar permissões/projetos {user}", key=hash_key(f"update_perm_{user}")):
+                if nova_senha:
+                    c.execute("UPDATE users SET password=?, projects=?, permissions=? WHERE username=?",
+                              (nova_senha, ','.join(projetos), ','.join(permissoes), user))
+                else:
+                    c.execute("UPDATE users SET projects=?, permissions=? WHERE username=?",
+                              (','.join(projetos), ','.join(permissoes), user))
+                conn.commit()
+                st.success(f"Permissões/projetos atualizados para {user}.")
+                st.rerun()
+
+    if st.button("Sair do Painel Admin"):
+        st.session_state.admin_authenticated = False
+        st.session_state.admin_mode = False
+        st.rerun()
+# USUÁRIO AUTENTICADO
 elif st.session_state.authenticated:
     username = st.session_state.username
     user_data = c.execute("SELECT projects, permissions FROM users WHERE username=?", (username,)).fetchone()
@@ -250,6 +289,7 @@ elif st.session_state.authenticated:
                     nome_base, revisao, versao = extrair_info_arquivo(filename)
                     if not nome_base:
                         st.error("Nome do arquivo deve conter rXvY.")
+                        st.stop()
                     else:
                         arquivos_existentes = os.listdir(path)
                         nomes_existentes = [f for f in arquivos_existentes if f.startswith(nome_base)]
@@ -273,8 +313,11 @@ elif st.session_state.authenticated:
 
                         if rev_atual < rev_max:
                             st.error(f"❌ Revisão {revisao} menor que revisão máxima existente (r{rev_max}). Upload não permitido.")
-                        elif filename in arquivos_existentes:
+                            st.stop()
+
+                        if filename in arquivos_existentes:
                             st.error("Arquivo com este nome completo já existe.")
+                            st.stop()
                         else:
                             existe_revisao_anterior = any(r[1] != revisao for r in revisoes_anteriores)
                             mesma_revisao_outras_versoes = any(r[1] == revisao and r[2] != versao for r in revisoes_anteriores)
@@ -291,13 +334,14 @@ elif st.session_state.authenticated:
 
                             elif mesma_revisao_outras_versoes and not confirmar_mesma_revisao:
                                 st.warning("⚠️ Mesma revisão detectada com nova versão. Confirme a caixa para prosseguir.")
-                            else:
-                                with open(file_path, "wb") as f:
-                                    f.write(uploaded_file.read())
+                                st.stop()
 
-                                st.success(f"✅ Arquivo `{filename}` salvo com sucesso.")
-                                log_action(username, "upload", file_path)
-                                  # NAVEGAÇÃO NA SIDEBAR: "Meus Projetos" e "Meus Clientes"
+                            with open(file_path, "wb") as f:
+                                f.write(uploaded_file.read())
+
+                            st.success(f"✅ Arquivo `{filename}` salvo com sucesso.")
+                            log_action(username, "upload", file_path)
+        # NAVEGAÇÃO NA SIDEBAR: "Meus Projetos" e "Meus Clientes"
     st.sidebar.markdown("### 🔎 Navegação Rápida")
 
     if st.sidebar.button("📁 Meus Projetos"):
@@ -334,19 +378,26 @@ elif st.session_state.authenticated:
                                         if "download" in user_permissions:
                                             st.download_button("📥 Baixar", f, file_name=file, key=hash_key(f"proj_dl_{full_path}"))
 
-                                    # Comentários
-                                    comments = c.execute("SELECT user, comment, timestamp FROM comments WHERE file_path=? ORDER BY timestamp DESC", (full_path,)).fetchall()
-                                    if comments:
-                                        st.markdown("💬 **Comentários:**")
-                                        for user_c, text_c, time_c in comments:
-                                            st.markdown(f"- {user_c} ({time_c[:19]}): {text_c}")
+                                    # Botão e área de comentários
+                                    if st.button(f"💬 Comentários: {os.path.basename(file)}", key=hash_key(f"btn_comments_{full_path}")):
+                                        st.session_state[f"show_comments_{full_path}"] = not st.session_state.get(f"show_comments_{full_path}", False)
 
-                                    new_comment = st.text_input(f"Adicionar comentário para `{file}`", key=hash_key(f"comment_input_proj_{full_path}"))
-                                    if st.button(f"💾 Comentar `{file}`", key=hash_key(f"comment_btn_proj_{full_path}")):
-                                        if new_comment.strip():
-                                            save_comment(full_path, username, new_comment.strip())
-                                            st.success("Comentário adicionado.")
-                                            st.rerun()
+                                    if st.session_state.get(f"show_comments_{full_path}", False):
+                                        comments = c.execute("SELECT user, comment, timestamp FROM comments WHERE file_path=? ORDER BY timestamp DESC", 
+                                                             (full_path,)).fetchall()
+                                        if comments:
+                                            st.markdown("💬 **Comentários:**")
+                                            for user_c, text_c, time_c in comments:
+                                                st.markdown(f"- {user_c} ({time_c[:19]}): {text_c}")
+                                        else:
+                                            st.info("Nenhum comentário ainda.")
+
+                                        new_comment = st.text_area(f"Novo comentário para `{os.path.basename(full_path)}`", key=hash_key(f"comment_input_{full_path}"))
+                                        if st.button(f"💾 Salvar comentário {os.path.basename(full_path)}", key=hash_key(f"comment_save_{full_path}")):
+                                            if new_comment.strip():
+                                                save_comment(full_path, username, new_comment.strip())
+                                                st.success("Comentário salvo.")
+                                                st.rerun()
 
     if st.sidebar.button("🏢 Meus Clientes"):
         meus_clientes = set()
@@ -393,20 +444,27 @@ elif st.session_state.authenticated:
                                                 if "download" in user_permissions:
                                                     st.download_button("📥 Baixar", f, file_name=file, key=hash_key(f"cli_dl_{full_path}"))
 
-                                            # Comentários
-                                            comments = c.execute("SELECT user, comment, timestamp FROM comments WHERE file_path=? ORDER BY timestamp DESC", (full_path,)).fetchall()
-                                            if comments:
-                                                st.markdown("💬 **Comentários:**")
-                                                for user_c, text_c, time_c in comments:
-                                                    st.markdown(f"- {user_c} ({time_c[:19]}): {text_c}")
+                                            # Botão e área de comentários
+                                            if st.button(f"💬 Comentários: {os.path.basename(file)}", key=hash_key(f"btn_comments_cli_{full_path}")):
+                                                st.session_state[f"show_comments_cli_{full_path}"] = not st.session_state.get(f"show_comments_cli_{full_path}", False)
 
-                                            new_comment = st.text_input(f"Adicionar comentário para `{file}`", key=hash_key(f"comment_input_cli_{full_path}"))
-                                            if st.button(f"💾 Comentar `{file}`", key=hash_key(f"comment_btn_cli_{full_path}")):
-                                                if new_comment.strip():
-                                                    save_comment(full_path, username, new_comment.strip())
-                                                    st.success("Comentário adicionado.")
-                                                    st.rerun()
-                                                      # PESQUISA POR PALAVRA-CHAVE (NOME + CONTEÚDO PDF)
+                                            if st.session_state.get(f"show_comments_cli_{full_path}", False):
+                                                comments = c.execute("SELECT user, comment, timestamp FROM comments WHERE file_path=? ORDER BY timestamp DESC", 
+                                                                     (full_path,)).fetchall()
+                                                if comments:
+                                                    st.markdown("💬 **Comentários:**")
+                                                    for user_c, text_c, time_c in comments:
+                                                        st.markdown(f"- {user_c} ({time_c[:19]}): {text_c}")
+                                                else:
+                                                    st.info("Nenhum comentário ainda.")
+
+                                                new_comment = st.text_area(f"Novo comentário para `{os.path.basename(full_path)}`", key=hash_key(f"comment_input_cli_{full_path}"))
+                                                if st.button(f"💾 Salvar comentário {os.path.basename(full_path)}", key=hash_key(f"comment_save_cli_{full_path}")):
+                                                    if new_comment.strip():
+                                                        save_comment(full_path, username, new_comment.strip())
+                                                        st.success("Comentário salvo.")
+                                                        st.rerun()
+        # PESQUISA POR PALAVRA-CHAVE (NOME + CONTEÚDO PDF)
     if "download" in user_permissions or "view" in user_permissions:
         st.markdown("### 🔍 Pesquisa de Documentos")
         keyword = st.text_input("Buscar por palavra-chave")
@@ -454,19 +512,28 @@ elif st.session_state.authenticated:
                         if "download" in user_permissions:
                             st.download_button("📥 Baixar", f, file_name=os.path.basename(file), key=hash_key("dlk_" + file))
 
-                    # Comentários
-                    comments = c.execute("SELECT user, comment, timestamp FROM comments WHERE file_path=? ORDER BY timestamp DESC", (file,)).fetchall()
-                    if comments:
-                        st.markdown("💬 **Comentários:**")
-                        for user_c, text_c, time_c in comments:
-                            st.markdown(f"- {user_c} ({time_c[:19]}): {text_c}")
+                    # Comentários na pesquisa
+                    if st.button(f"💬 Comentários: {os.path.basename(file)}", key=hash_key(f"btn_comments_search_{file}")):
+                        st.session_state[f"show_comments_search_{file}"] = not st.session_state.get(f"show_comments_search_{file}", False)
 
-                    new_comment = st.text_input(f"Adicionar comentário para `{os.path.basename(file)}`", key=hash_key(f"comment_input_search_{file}"))
-                    if st.button(f"💾 Comentar `{os.path.basename(file)}`", key=hash_key(f"comment_btn_search_{file}")):
-                        if new_comment.strip():
-                            save_comment(file, username, new_comment.strip())
-                            st.success("Comentário adicionado.")
-                            st.rerun()
+                    if st.session_state.get(f"show_comments_search_{file}", False):
+                        comments = c.execute("SELECT user, comment, timestamp FROM comments WHERE file_path=? ORDER BY timestamp DESC", 
+                                             (file,)).fetchall()
+                        if comments:
+                            st.markdown("💬 **Comentários:**")
+                            for user_c, text_c, time_c in comments:
+                                st.markdown(f"- {user_c} ({time_c[:19]}): {text_c}")
+                        else:
+                            st.info("Nenhum comentário ainda.")
+
+                        new_comment = st.text_area(f"Novo comentário para `{os.path.basename(file)}`", key=hash_key(f"comment_input_search_{file}"))
+                        if st.button(f"💾 Salvar comentário {os.path.basename(file)}", key=hash_key(f"comment_save_search_{file}")):
+                            if new_comment.strip():
+                                save_comment(file, username, new_comment.strip())
+                                st.success("Comentário salvo.")
+                                st.rerun()
+
+                    log_action(username, "visualizar", file)
             else:
                 st.warning("Nenhum arquivo encontrado.")
 
