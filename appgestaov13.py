@@ -391,31 +391,31 @@ elif st.session_state.authenticated:
                                         if "download" in user_permissions:
                                             st.download_button("📥 Baixar", f, file_name=file, key=hash_key(f"dl_{full_path}"))
 
-# Seção de Comentários
-with st.expander("💬 Comentários", expanded=False):
-    comentario_key = hash_key("coment_" + full_path)
-    botao_key = hash_key("btn_com_" + full_path)
-
-    st.markdown("##### Novo Comentário")
-    novo_coment = st.text_area("Digite seu comentário", key=comentario_key)
-
-    if st.button("Enviar comentário", key=botao_key):
-        if novo_coment.strip():
-            salvar_comentario(full_path, username, novo_coment.strip())
-            st.success("Comentário salvo com sucesso.")
-            st.experimental_rerun()
-        else:
-            st.warning("Comentário vazio não será salvo.")
-
-    st.markdown("##### Comentários Anteriores")
-    comentarios = obter_comentarios(full_path)
-    if comentarios:
-        for user, time, text in comentarios:
-            st.markdown(f"**{user}** ({time[:19]}):")
-            st.markdown(f"> {text}")
-            st.markdown("---")
-    else:
-        st.info("Nenhum comentário ainda.")
+                                    # Seção de Comentários
+                                    with st.expander("💬 Comentários", expanded=False):
+                                        comentario_key = hash_key("coment_" + full_path)
+                                        botao_key = hash_key("btn_com_" + full_path)
+                                    
+                                        st.markdown("##### Novo Comentário")
+                                        novo_coment = st.text_area("Digite seu comentário", key=comentario_key)
+                                    
+                                        if st.button("Enviar comentário", key=botao_key):
+                                            if novo_coment.strip():
+                                                salvar_comentario(full_path, username, novo_coment.strip())
+                                                st.success("Comentário salvo com sucesso.")
+                                                st.experimental_rerun()
+                                            else:
+                                                st.warning("Comentário vazio não será salvo.")
+                                    
+                                        st.markdown("##### Comentários Anteriores")
+                                        comentarios = obter_comentarios(full_path)
+                                        if comentarios:
+                                            for user, time, text in comentarios:
+                                                st.markdown(f"**{user}** ({time[:19]}):")
+                                                st.markdown(f"> {text}")
+                                                st.markdown("---")
+                                        else:
+                                            st.info("Nenhum comentário ainda.")
         
     if st.sidebar.button("🏢 Meus Clientes"):
         meus_clientes = set()
@@ -462,31 +462,31 @@ with st.expander("💬 Comentários", expanded=False):
                                         if "download" in user_permissions:
                                             st.download_button("📥 Baixar", f, file_name=file, key=hash_key(f"dl_{full_path}"))
 
-# Seção de Comentários
-with st.expander("💬 Comentários", expanded=False):
-    comentario_key = hash_key("coment_" + full_path)
-    botao_key = hash_key("btn_com_" + full_path)
-
-    st.markdown("##### Novo Comentário")
-    novo_coment = st.text_area("Digite seu comentário", key=comentario_key)
-
-    if st.button("Enviar comentário", key=botao_key):
-        if novo_coment.strip():
-            salvar_comentario(full_path, username, novo_coment.strip())
-            st.success("Comentário salvo com sucesso.")
-            st.experimental_rerun()
-        else:
-            st.warning("Comentário vazio não será salvo.")
-
-    st.markdown("##### Comentários Anteriores")
-    comentarios = obter_comentarios(full_path)
-    if comentarios:
-        for user, time, text in comentarios:
-            st.markdown(f"**{user}** ({time[:19]}):")
-            st.markdown(f"> {text}")
-            st.markdown("---")
-    else:
-        st.info("Nenhum comentário ainda.")
+                                            # Seção de Comentários
+                                            with st.expander("💬 Comentários", expanded=False):
+                                                comentario_key = hash_key("coment_" + full_path)
+                                                botao_key = hash_key("btn_com_" + full_path)
+                                            
+                                                st.markdown("##### Novo Comentário")
+                                                novo_coment = st.text_area("Digite seu comentário", key=comentario_key)
+                                            
+                                                if st.button("Enviar comentário", key=botao_key):
+                                                    if novo_coment.strip():
+                                                        salvar_comentario(full_path, username, novo_coment.strip())
+                                                        st.success("Comentário salvo com sucesso.")
+                                                        st.experimental_rerun()
+                                                    else:
+                                                        st.warning("Comentário vazio não será salvo.")
+                                            
+                                                st.markdown("##### Comentários Anteriores")
+                                                comentarios = obter_comentarios(full_path)
+                                                if comentarios:
+                                                    for user, time, text in comentarios:
+                                                        st.markdown(f"**{user}** ({time[:19]}):")
+                                                        st.markdown(f"> {text}")
+                                                        st.markdown("---")
+                                                else:
+                                                    st.info("Nenhum comentário ainda.")
         
     # PESQUISA POR PALAVRA-CHAVE (NOME + CONTEÚDO PDF)
     if "download" in user_permissions or "view" in user_permissions:
