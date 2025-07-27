@@ -11,8 +11,6 @@ import fitz
 # Banco de dados SQLite
 conn = sqlite3.connect('document_manager.db', check_same_thread=False)
 c = conn.cursor()
-
-# Tabelas principais
 c.execute('''CREATE TABLE IF NOT EXISTS users (
     username TEXT PRIMARY KEY,
     password TEXT,
@@ -32,8 +30,7 @@ c.execute('''CREATE TABLE IF NOT EXISTS projects (
     name TEXT PRIMARY KEY,
     client TEXT
 )''')
-
-# Nova tabela de comentários
+# Tabela de comentários
 c.execute('''
 CREATE TABLE IF NOT EXISTS comments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -44,11 +41,9 @@ CREATE TABLE IF NOT EXISTS comments (
 )
 ''')
 conn.commit()
-
 BASE_DIR = "uploads"
 os.makedirs(BASE_DIR, exist_ok=True)
 
-# Sessão
 if "disciplinas" not in st.session_state:
     st.session_state.disciplinas = ["GES", "PRO", "MEC", "MET", "CIV", "ELE", "AEI"]
 if "fases" not in st.session_state:
@@ -58,7 +53,6 @@ if "projetos_registrados" not in st.session_state:
 if "clientes_registrados" not in st.session_state:
     st.session_state.clientes_registrados = []
 
-# Utilitários
 def get_project_path(project, discipline, phase):
     path = os.path.join(BASE_DIR, project, discipline, phase)
     os.makedirs(path, exist_ok=True)
@@ -91,7 +85,6 @@ def extrair_info_arquivo(nome_arquivo):
         return nome_base, revisao, versao
     return None, None, None
 
-# Funções de comentários
 def salvar_comentario(file_path, username, comment):
     timestamp = datetime.now().isoformat()
     c.execute('''INSERT INTO comments (file_path, username, timestamp, comment)
@@ -105,7 +98,6 @@ def obter_comentarios(file_path):
                         WHERE file_path=?
                         ORDER BY timestamp DESC''', (file_path,)).fetchall()
 
-# Flags de sessão
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 if "registration_mode" not in st.session_state:
@@ -265,6 +257,7 @@ elif st.session_state.admin_mode and st.session_state.admin_authenticated:
         st.session_state.admin_authenticated = False
         st.session_state.admin_mode = False
         st.rerun()
+
 # USUÁRIO AUTENTICADO
 elif st.session_state.authenticated:
     username = st.session_state.username
@@ -278,9 +271,92 @@ elif st.session_state.authenticated:
         st.session_state.username = ""
         st.rerun()
 
-    # Upload e outras seções aqui (mantidos como estavam)
+    # UPLOAD
+    if "upload" in user_permissions:
+        st.markdown("### ⬆️ Upload de Arquivos")
+        with st.form("upload_form"):
+            if not user_projects:
+                st.warning("Você ainda não tem projetos atribuídos.")
+            else:
+                project = st.selectbox("Projeto", user_projects)
+                discipline = st.selectbox("Disciplina", st.session_state.disciplinas)
+                phase = st.selectbox("Fase", st.session_state.fases)
+                uploaded_file = st.file_uploader("Escolha o arquivo")
+                confirmar_mesma_revisao = st.checkbox("Confirmo que estou mantendo a mesma revisão e subindo nova versão")
 
-    # VISUALIZAÇÃO: Meus Projetos
+                if uploaded_file:
+                    nome_base, revisao, versao = extrair_info_arquivo(uploaded_file.name)
+                    if nome_base and revisao and versao:
+                        st.info(f"🧠 Detecção automática: `{uploaded_file.name}` → Revisão: **{revisao}**, Versão: **{versao}**")
+                    else:
+                        st.error("❌ Nome do arquivo deve conter rXvY (ex: r1v2).")
+
+                submitted = st.form_submit_button("Enviar")
+                if submitted and uploaded_file:
+                    filename = uploaded_file.name
+                    path = get_project_path(project, discipline, phase)
+                    file_path = os.path.join(path, filename)
+
+                    nome_base, revisao, versao = extrair_info_arquivo(filename)
+                    if not nome_base:
+                        st.error("Nome do arquivo deve conter rXvY.")
+                        st.stop()
+                    else:
+                        arquivos_existentes = os.listdir(path)
+                        nomes_existentes = [f for f in arquivos_existentes if f.startswith(nome_base)]
+
+                        revisoes_anteriores = []
+                        for f in nomes_existentes:
+                            base_ant, rev_ant, ver_ant = extrair_info_arquivo(f)
+                            if base_ant == nome_base:
+                                revisoes_anteriores.append((f, rev_ant, ver_ant))
+
+                        # Verificar também revisões na pasta Revisoes/{nome_base}
+                        pasta_revisoes = os.path.join(path, "Revisoes", nome_base)
+                        if os.path.isdir(pasta_revisoes):
+                            for f in os.listdir(pasta_revisoes):
+                                base_ant, rev_ant, ver_ant = extrair_info_arquivo(f)
+                                if base_ant == nome_base:
+                                    revisoes_anteriores.append((f, rev_ant, ver_ant))
+
+                        revisoes_existentes = [int(r[1][1:]) for r in revisoes_anteriores if r[1] and r[1].startswith('r')]
+                        rev_max = max(revisoes_existentes) if revisoes_existentes else -1
+                        rev_atual = int(revisao[1:])
+
+                        if rev_atual < rev_max:
+                            st.error(f"❌ Revisão {revisao} menor que revisão máxima existente (r{rev_max}). Upload não permitido.")
+                            st.stop()
+
+                        if filename in arquivos_existentes:
+                            st.error("Arquivo com este nome completo já existe.")
+                            st.stop()
+                        else:
+                            existe_revisao_anterior = any(r[1] != revisao for r in revisoes_anteriores)
+                            mesma_revisao_outras_versoes = any(r[1] == revisao and r[2] != versao for r in revisoes_anteriores)
+
+                            if existe_revisao_anterior:
+                                pasta_revisao = os.path.join(path, "Revisoes", nome_base)
+                                os.makedirs(pasta_revisao, exist_ok=True)
+                                for f, _, _ in revisoes_anteriores:
+                                    origem = os.path.join(path, f)
+                                    destino = os.path.join(pasta_revisao, f)
+                                    if os.path.exists(origem):
+                                        shutil.move(origem, destino)
+                                st.info(f"🗂️ Arquivos da revisão anterior movidos para `{pasta_revisao}`")
+
+                            elif mesma_revisao_outras_versoes and not confirmar_mesma_revisao:
+                                st.warning("⚠️ Mesma revisão detectada com nova versão. Confirme a caixa para prosseguir.")
+                                st.stop()
+
+                            with open(file_path, "wb") as f:
+                                f.write(uploaded_file.read())
+
+                            st.success(f"✅ Arquivo `{filename}` salvo com sucesso.")
+                            log_action(username, "upload", file_path)
+                            
+    # NAVEGAÇÃO NA SIDEBAR: "Meus Projetos" e "Meus Clientes"
+    st.sidebar.markdown("### 🔎 Navegação Rápida")
+
     if st.sidebar.button("📁 Meus Projetos"):
         for proj in sorted(user_projects):
             proj_path = os.path.join(BASE_DIR, proj)
@@ -315,7 +391,9 @@ elif st.session_state.authenticated:
                                         if "download" in user_permissions:
                                             st.download_button("📥 Baixar", f, file_name=file, key=hash_key(f"dl_{full_path}"))
 
+                                    # Seção de Comentários
                                     with st.expander("💬 Comentários", expanded=False):
+                                        st.markdown("##### Novo Comentário")
                                         novo_coment = st.text_area(f"Digite seu comentário ({file})", key=hash_key("coment_" + file))
                                         if st.button("Enviar comentário", key=hash_key("btn_com_" + file)):
                                             if novo_coment.strip():
@@ -323,14 +401,17 @@ elif st.session_state.authenticated:
                                                 st.success("Comentário salvo.")
                                             else:
                                                 st.warning("Comentário vazio não será salvo.")
+    
+                                        st.markdown("##### Comentários Anteriores")
                                         comentarios = obter_comentarios(full_path)
                                         if comentarios:
                                             for user, time, text in comentarios:
-                                                st.markdown(f"**{user}** ({time[:19]}):\n> {text}\n---")
+                                                st.markdown(f"**{user}** ({time[:19]}):")
+                                                st.markdown(f"> {text}")
+                                                st.markdown("---")
                                         else:
                                             st.info("Nenhum comentário ainda.")
 
-    # VISUALIZAÇÃO: Meus Clientes
     if st.sidebar.button("🏢 Meus Clientes"):
         meus_clientes = set()
         for proj in user_projects:
@@ -366,32 +447,38 @@ elif st.session_state.authenticated:
                                             if os.path.isdir(full_path):
                                                 continue
 
-                                            st.markdown(f"- `{file}`")
-                                            with open(full_path, "rb") as f:
-                                                if file.lower().endswith(".pdf"):
-                                                    b64 = base64.b64encode(f.read()).decode("utf-8")
-                                                    href = f'<a href="data:application/pdf;base64,{b64}" target="_blank">👁️ Visualizar PDF</a>'
-                                                    st.markdown(href, unsafe_allow_html=True)
-                                                f.seek(0)
-                                                if "download" in user_permissions:
-                                                    st.download_button("📥 Baixar", f, file_name=file, key=hash_key(f"cli_dl_{full_path}"))
+                                    st.markdown(f"- `{file}`")
+                                    with open(full_path, "rb") as f:
+                                        if file.lower().endswith(".pdf"):
+                                            b64 = base64.b64encode(f.read()).decode("utf-8")
+                                            href = f'<a href="data:application/pdf;base64,{b64}" target="_blank">👁️ Visualizar PDF</a>'
+                                            st.markdown(href, unsafe_allow_html=True)
+                                        f.seek(0)
+                                        if "download" in user_permissions:
+                                            st.download_button("📥 Baixar", f, file_name=file, key=hash_key(f"dl_{full_path}"))
 
-                                            with st.expander("💬 Comentários", expanded=False):
-                                                novo_coment = st.text_area(f"Digite seu comentário ({file})", key=hash_key("coment_cli_" + file))
-                                                if st.button("Enviar comentário", key=hash_key("btn_com_cli_" + file)):
-                                                    if novo_coment.strip():
-                                                        salvar_comentario(full_path, username, novo_coment.strip())
-                                                        st.success("Comentário salvo.")
-                                                    else:
-                                                        st.warning("Comentário vazio não será salvo.")
-                                                comentarios = obter_comentarios(full_path)
-                                                if comentarios:
-                                                    for user, time, text in comentarios:
-                                                        st.markdown(f"**{user}** ({time[:19]}):\n> {text}\n---")
-                                                else:
-                                                    st.info("Nenhum comentário ainda.")
-
-    # VISUALIZAÇÃO: Pesquisa de Documentos
+                                    # Seção de Comentários
+                                    with st.expander("💬 Comentários", expanded=False):
+                                        st.markdown("##### Novo Comentário")
+                                        novo_coment = st.text_area(f"Digite seu comentário ({file})", key=hash_key("coment_" + file))
+                                        if st.button("Enviar comentário", key=hash_key("btn_com_" + file)):
+                                            if novo_coment.strip():
+                                                salvar_comentario(full_path, username, novo_coment.strip())
+                                                st.success("Comentário salvo.")
+                                            else:
+                                                st.warning("Comentário vazio não será salvo.")
+    
+                                        st.markdown("##### Comentários Anteriores")
+                                        comentarios = obter_comentarios(full_path)
+                                        if comentarios:
+                                            for user, time, text in comentarios:
+                                                st.markdown(f"**{user}** ({time[:19]}):")
+                                                st.markdown(f"> {text}")
+                                                st.markdown("---")
+                                        else:
+                                            st.info("Nenhum comentário ainda.")
+                                                    
+    # PESQUISA POR PALAVRA-CHAVE (NOME + CONTEÚDO PDF)
     if "download" in user_permissions or "view" in user_permissions:
         st.markdown("### 🔍 Pesquisa de Documentos")
         keyword = st.text_input("Buscar por palavra-chave")
@@ -402,50 +489,54 @@ elif st.session_state.authenticated:
                     full_path = os.path.join(root, file)
                     if not os.path.isfile(full_path):
                         continue
+
                     rel_path_parts = os.path.relpath(full_path, BASE_DIR).split(os.sep)
                     if rel_path_parts[0] not in user_projects:
                         continue
-                    match_found = keyword.lower() in file.lower()
-                    if not match_found and file.lower().endswith(".pdf"):
+
+                    match_found = False
+                    if keyword.lower() in file.lower():
+                        match_found = True
+                    elif file.lower().endswith(".pdf"):
                         try:
                             doc = fitz.open(full_path)
-                            text = "".join([page.get_text() for page in doc])
+                            text = ""
+                            for page in doc:
+                                text += page.get_text()
                             doc.close()
                             if keyword.lower() in text.lower():
                                 match_found = True
-                        except:
-                            pass
+                        except Exception as e:
+                            st.warning(f"Erro ao ler PDF `{file}`: {str(e)}")
+
                     if match_found:
                         matched.append(full_path)
 
             if matched:
                 for file in matched:
-                    st.markdown(f"- `{os.path.relpath(file, BASE_DIR)}`")
+                    st.write(f"📄 {os.path.relpath(file, BASE_DIR)}")
                     with open(file, "rb") as f:
+                        b64 = base64.b64encode(f.read()).decode("utf-8")
                         if file.lower().endswith(".pdf"):
-                            b64 = base64.b64encode(f.read()).decode("utf-8")
                             href = f'<a href="data:application/pdf;base64,{b64}" target="_blank">👁️ Visualizar PDF</a>'
-                            st.markdown(href, unsafe_allow_html=True)
-                        f.seek(0)
-                        if "download" in user_permissions:
-                            st.download_button("📥 Baixar", f, file_name=os.path.basename(file), key=hash_key(f"dlk_{file}"))
-
-                    with st.expander("💬 Comentários", expanded=False):
-                        novo_coment = st.text_area(f"Digite seu comentário ({file})", key=hash_key("coment_k_" + file))
-                        if st.button("Enviar comentário", key=hash_key("btn_com_k_" + file)):
-                            if novo_coment.strip():
-                                salvar_comentario(file, username, novo_coment.strip())
-                                st.success("Comentário salvo.")
-                            else:
-                                st.warning("Comentário vazio não será salvo.")
-                        comentarios = obter_comentarios(file)
-                        if comentarios:
-                            for user, time, text in comentarios:
-                                st.markdown(f"**{user}** ({time[:19]}):\n> {text}\n---")
+                            if st.button("👁️ Visualizar PDF", key=hash_key("btnk_" + file)):
+                                st.markdown(href, unsafe_allow_html=True)
+                            f.seek(0)
+                            if "download" in user_permissions:
+                                st.download_button("📥 Baixar PDF", f, file_name=os.path.basename(file), mime="application/pdf", key=hash_key("dlk_" + file))
+                        elif file.lower().endswith(('.jpg', '.jpeg', '.png')):
+                            st.image(f.read(), caption=os.path.basename(file))
+                            f.seek(0)
+                            if "download" in user_permissions:
+                                st.download_button("📥 Baixar Imagem", f, file_name=os.path.basename(file), key=hash_key("imgk_" + file))
                         else:
-                            st.info("Nenhum comentário ainda.")
+                            if "download" in user_permissions:
+                                st.download_button("📥 Baixar Arquivo", f, file_name=os.path.basename(file), key=hash_key("othk_" + file))
+                    log_action(username, "visualizar", file)
+            else:
+                st.warning("Nenhum arquivo encontrado.")
 
-    # HISTÓRICO DE AÇÕES
+    # HISTÓRICO DE AÇÕES (disponível para autenticados)
     st.markdown("### 📜 Histórico de Ações")
     if st.checkbox("Mostrar log"):
         logs = c.execute("SELECT * FROM logs ORDER BY timestamp DESC LIMIT 50").fetchall()
